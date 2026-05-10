@@ -1,144 +1,180 @@
-"""CLI entry point for the search engine tool.
+"""Command-line interface for the coursework search engine."""
 
-Provides an interactive shell supporting build, load, print, and find
-commands for crawling, indexing, and searching quotes.toscrape.com.
-"""
+from __future__ import annotations
 
+import argparse
+from pathlib import Path
 import sys
-import logging
-import time
 
-from src.crawler import Crawler, BASE_URL
-from src.indexer import InvertedIndex, DEFAULT_INDEX_PATH
-from src.search import SearchEngine
+try:
+    from .crawler import DEFAULT_TARGET_URL, WebCrawler
+    from .indexer import InvertedIndex, tokenize
+    from .search import SearchEngine
+except ImportError:  # pragma: no cover - allows direct execution from src/.
+    from crawler import DEFAULT_TARGET_URL, WebCrawler
+    from indexer import InvertedIndex, tokenize
+    from search import SearchEngine
 
-logger = logging.getLogger(__name__)
-
-HELP_TEXT = """
-Available commands:
-  build             Crawl the website and build the inverted index
-  load              Load a previously saved index from file
-  print <word>      Show the inverted index entry for a word
-  find <query>      Find pages containing the search term(s)
-  help              Show this help message
-  quit / exit       Exit the search tool
-""".strip()
+DEFAULT_INDEX_FILE = Path("data/index.json")
 
 
-def run_cli() -> None:
-    """Run the interactive command-line shell."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(message)s",
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Search engine coursework tool.")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    build_parser = subparsers.add_parser("build", help="Crawl the website and build the index.")
+    build_parser.add_argument("--url", default=DEFAULT_TARGET_URL, help="Website to crawl.")
+    build_parser.add_argument(
+        "--index-file",
+        default=str(DEFAULT_INDEX_FILE),
+        help="Where to store the compiled index file.",
     )
+    build_parser.add_argument(
+        "--delay",
+        type=float,
+        default=6.0,
+        help="Seconds to wait between successive HTTP requests.",
+    )
+    build_parser.add_argument(
+        "--timeout",
+        type=float,
+        default=10.0,
+        help="HTTP timeout for each request in seconds.",
+    )
+    build_parser.set_defaults(handler=handle_build)
 
-    index = InvertedIndex()
-    engine = SearchEngine(index)
-    index_ready = False
+    load_parser = subparsers.add_parser("load", help="Load a previously built index from disk.")
+    load_parser.add_argument(
+        "--index-file",
+        default=str(DEFAULT_INDEX_FILE),
+        help="Path to the compiled index file.",
+    )
+    load_parser.set_defaults(handler=handle_load)
 
-    print("=" * 56)
-    print("  Search Engine Tool — quotes.toscrape.com")
-    print("=" * 56)
-    print(f'Type "help" for available commands.\n')
+    print_parser = subparsers.add_parser("print", help="Print the postings list for one word.")
+    print_parser.add_argument("term", nargs="?", help="Word to inspect in the inverted index.")
+    print_parser.add_argument(
+        "--index-file",
+        default=str(DEFAULT_INDEX_FILE),
+        help="Path to the compiled index file.",
+    )
+    print_parser.set_defaults(handler=handle_print)
 
-    while True:
-        try:
-            user_input = input("> ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\nGoodbye!")
-            break
+    find_parser = subparsers.add_parser("find", help="Find pages containing the query terms.")
+    find_parser.add_argument("query", nargs="*", help="One or more words to search for.")
+    find_parser.add_argument(
+        "--index-file",
+        default=str(DEFAULT_INDEX_FILE),
+        help="Path to the compiled index file.",
+    )
+    find_parser.set_defaults(handler=handle_find)
 
-        if not user_input:
-            continue
-
-        parts = user_input.split(maxsplit=1)
-        command = parts[0].lower()
-        argument = parts[1] if len(parts) > 1 else ""
-
-        if command in ("quit", "exit"):
-            print("Goodbye!")
-            break
-
-        elif command == "help":
-            print(HELP_TEXT)
-
-        elif command == "build":
-            _handle_build(index, engine)
-            index_ready = True
-
-        elif command == "load":
-            success = _handle_load(index, engine)
-            if success:
-                index_ready = True
-
-        elif command == "print":
-            if not index_ready:
-                print('Index not loaded. Run "build" or "load" first.')
-                continue
-            _handle_print(engine, argument)
-
-        elif command == "find":
-            if not index_ready:
-                print('Index not loaded. Run "build" or "load" first.')
-                continue
-            _handle_find(engine, argument)
-
-        else:
-            print(f'Unknown command: "{command}". Type "help" for usage.')
+    return parser
 
 
-def _handle_build(index: InvertedIndex, engine: SearchEngine) -> None:
-    """Execute the build command: crawl, index, and save."""
-    print(f"Crawling {BASE_URL} ...")
-    start = time.time()
-
-    crawler = Crawler()
+def handle_build(args: argparse.Namespace) -> int:
+    crawler = WebCrawler(
+        base_url=args.url,
+        politeness_delay=args.delay,
+        timeout=args.timeout,
+    )
     pages = crawler.crawl()
+    if not pages:
+        print("No pages were crawled, so no index file was created.", file=sys.stderr)
+        return 1
 
-    elapsed_crawl = time.time() - start
-    print(f"Crawled {len(pages)} pages in {elapsed_crawl:.0f} seconds.\n")
+    index = InvertedIndex.build(pages)
+    index.save(args.index_file)
 
-    print("Building inverted index...")
-    index.build(pages)
     print(
-        f"Index built: {index.total_words} unique words "
-        f"across {index.total_docs} pages.\n"
+        f"Built index with {index.term_count} terms across {index.page_count} pages "
+        f"and saved it to {args.index_file}."
     )
+    if crawler.errors:
+        print(f"Skipped {len(crawler.errors)} pages because of HTTP errors.")
+    return 0
 
-    index.save(DEFAULT_INDEX_PATH)
-    print(f"Index saved to {DEFAULT_INDEX_PATH}")
+
+def handle_load(args: argparse.Namespace) -> int:
+    index = InvertedIndex.load(args.index_file)
+    print(
+        f"Loaded index with {index.term_count} terms across {index.page_count} pages "
+        f"from {args.index_file}."
+    )
+    return 0
 
 
-def _handle_load(index: InvertedIndex, engine: SearchEngine) -> bool:
-    """Execute the load command: read index from file."""
-    try:
-        index.load(DEFAULT_INDEX_PATH)
+def handle_print(args: argparse.Namespace) -> int:
+    if not args.term or not tokenize(args.term):
+        print("Please provide a searchable word for the print command.", file=sys.stderr)
+        return 1
+
+    index = InvertedIndex.load(args.index_file)
+    search_engine = SearchEngine(index)
+    term = tokenize(args.term)[0]
+    postings = search_engine.print_term(args.term)
+
+    if not postings:
+        print(f"No index entry found for '{term}'.")
+        return 0
+
+    print(f"Index entry for '{term}':")
+    for url in sorted(postings):
+        page_info = index.pages.get(url, {})
+        stats = postings[url]
         print(
-            f"Index loaded: {index.total_words} unique words, "
-            f"{index.total_docs} pages."
+            f"- {url} | title={page_info.get('title', url)} | "
+            f"count={stats['count']} | positions={stats['positions']}"
         )
-        return True
+    return 0
+
+
+def handle_find(args: argparse.Namespace) -> int:
+    query_text = " ".join(args.query)
+    index = InvertedIndex.load(args.index_file)
+    search_engine = SearchEngine(index)
+
+    try:
+        results = search_engine.find(query_text)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    if not results:
+        print(f"No pages found for query: {query_text!r}")
+        return 0
+
+    print(f"Results for query: {query_text!r}")
+    for result in results:
+        term_summary = ", ".join(
+            f"{term}={count}" for term, count in result.term_frequencies.items()
+        )
+        tfidf_summary = ", ".join(
+            f"{term}={score:.4f}" for term, score in result.tfidf_scores.items()
+        )
+        extras = f"tfidf=[{tfidf_summary}]"
+        if result.phrase_matches:
+            extras = f"{extras}, phrase_matches={result.phrase_matches}"
+        print(
+            f"- {result.url} | title={result.title} | score={result.score:.4f} | {term_summary} | {extras}"
+        )
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    try:
+        return args.handler(args)
     except FileNotFoundError:
         print(
-            f'Index file not found at "{DEFAULT_INDEX_PATH}". '
-            f'Run "build" first to create it.'
+            f"Index file not found: {args.index_file}. Run the build command first.",
+            file=sys.stderr,
         )
-        return False
-    except Exception as e:
-        print(f"Error loading index: {e}")
-        return False
-
-
-def _handle_print(engine: SearchEngine, argument: str) -> None:
-    """Execute the print command: display index entry for a word."""
-    print(engine.print_word(argument))
-
-
-def _handle_find(engine: SearchEngine, argument: str) -> None:
-    """Execute the find command: search for pages matching a query."""
-    results = engine.find(argument)
-    print(engine.format_results(argument, results))
+        return 1
 
 
 if __name__ == "__main__":
-    run_cli()
+    raise SystemExit(main())
+
