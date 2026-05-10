@@ -1,1 +1,1 @@
-
+"""Coursework search engine package."""
