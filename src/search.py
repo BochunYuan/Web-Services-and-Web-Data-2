@@ -27,12 +27,15 @@ class SearchEngine:
     """Provides print and find behaviour on top of the inverted index."""
 
     def __init__(self, index: InvertedIndex) -> None:
+        """Initialise the search engine with a loaded inverted index."""
         self.index = index
 
     def print_term(self, term: str) -> dict[str, dict[str, int | list[int]]]:
+        """Return the raw postings list for a single search term."""
         return self.index.get_postings(term)
 
     def find(self, query: str) -> list[SearchResult]:
+        """Search the index using TF-IDF scoring with phrase match bonus."""
         terms = tokenize(query)
         if not terms:
             raise ValueError("Query must contain at least one searchable word.")
@@ -88,6 +91,7 @@ class SearchEngine:
         return results
 
     def _count_phrase_matches(self, url: str, terms: list[str]) -> int:
+        """Count how many times the query terms appear consecutively on a page."""
         if len(terms) < 2:
             return 0
 
