@@ -19,6 +19,7 @@ DEFAULT_INDEX_FILE = Path("data/index.json")
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Create the argument parser with build, load, print, and find subcommands."""
     parser = argparse.ArgumentParser(description="Search engine coursework tool.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -73,6 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def handle_build(args: argparse.Namespace) -> int:
+    """Crawl the target website, build the inverted index, and save it to disk."""
     crawler = WebCrawler(
         base_url=args.url,
         politeness_delay=args.delay,
@@ -96,6 +98,7 @@ def handle_build(args: argparse.Namespace) -> int:
 
 
 def handle_load(args: argparse.Namespace) -> int:
+    """Load a previously built index from disk and print a summary."""
     index = InvertedIndex.load(args.index_file)
     print(
         f"Loaded index with {index.term_count} terms across {index.page_count} pages "
@@ -105,6 +108,7 @@ def handle_load(args: argparse.Namespace) -> int:
 
 
 def handle_print(args: argparse.Namespace) -> int:
+    """Print the inverted index entry for a single word."""
     if not args.term or not tokenize(args.term):
         print("Please provide a searchable word for the print command.", file=sys.stderr)
         return 1
@@ -130,6 +134,7 @@ def handle_print(args: argparse.Namespace) -> int:
 
 
 def handle_find(args: argparse.Namespace) -> int:
+    """Search the index for query terms and display TF-IDF ranked results."""
     query_text = " ".join(args.query)
     index = InvertedIndex.load(args.index_file)
     search_engine = SearchEngine(index)
@@ -162,6 +167,7 @@ def handle_find(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Parse arguments and dispatch to the appropriate command handler."""
     parser = build_parser()
     args = parser.parse_args(argv)
 
