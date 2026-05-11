@@ -29,11 +29,13 @@ class InvertedIndex:
         index: dict[str, dict[str, dict[str, int | list[int]]]] | None = None,
         pages: dict[str, dict[str, str | int]] | None = None,
     ) -> None:
+        """Initialise with optional pre-built index and page metadata."""
         self.index = index or {}
         self.pages = pages or {}
 
     @classmethod
     def build(cls, pages: Iterable[PageData]) -> "InvertedIndex":
+        """Construct an inverted index from an iterable of crawled pages."""
         instance = cls()
         for page in pages:
             instance.add_page(page)
@@ -41,10 +43,12 @@ class InvertedIndex:
 
     @classmethod
     def load(cls, path: str | Path) -> "InvertedIndex":
+        """Deserialise an inverted index from a JSON file on disk."""
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
         return cls(index=payload.get("index", {}), pages=payload.get("pages", {}))
 
     def add_page(self, page: PageData) -> None:
+        """Tokenise a page and add its word statistics to the index."""
         tokens = tokenize(page.text)
         self.pages[page.url] = {
             "title": page.title,
@@ -58,12 +62,14 @@ class InvertedIndex:
             page_stats["positions"].append(position)
 
     def get_postings(self, term: str) -> dict[str, dict[str, int | list[int]]]:
+        """Return the postings list for a single term (frequency and positions per page)."""
         tokens = tokenize(term)
         if not tokens:
             return {}
         return self.index.get(tokens[0], {})
 
     def save(self, path: str | Path) -> None:
+        """Serialise the index to a JSON file, creating parent directories if needed."""
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(
@@ -72,6 +78,7 @@ class InvertedIndex:
         )
 
     def to_dict(self) -> dict[str, dict[str, object]]:
+        """Return the index and page metadata as a plain dictionary."""
         return {
             "index": self.index,
             "pages": self.pages,
@@ -79,9 +86,11 @@ class InvertedIndex:
 
     @property
     def page_count(self) -> int:
+        """Return the number of indexed pages."""
         return len(self.pages)
 
     @property
     def term_count(self) -> int:
+        """Return the number of distinct terms in the index."""
         return len(self.index)
 
