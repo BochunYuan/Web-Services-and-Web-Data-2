@@ -38,6 +38,7 @@ class WebCrawler:
         clock_func: Callable[[], float] = time.monotonic,
         timeout: float = 10.0,
     ) -> None:
+        """Initialise the crawler with a target site and politeness settings."""
         self.base_url = self._normalise_url(base_url)
         self.base_netloc = urlsplit(self.base_url).netloc
         self.politeness_delay = politeness_delay
@@ -74,6 +75,7 @@ class WebCrawler:
         return pages
 
     def _fetch_page(self, url: str) -> PageData:
+        """Fetch a single page, parse its content, and return structured data."""
         self._wait_if_needed()
         request_started_at = self.clock_func()
         self._last_request_started_at = request_started_at
@@ -90,6 +92,7 @@ class WebCrawler:
         )
 
     def _wait_if_needed(self) -> None:
+        """Sleep if the politeness delay has not yet elapsed since the last request."""
         if self._last_request_started_at is None:
             return
 
@@ -99,6 +102,7 @@ class WebCrawler:
             self.sleep_func(remaining)
 
     def _extract_links(self, soup: BeautifulSoup, current_url: str) -> set[str]:
+        """Return all normalised internal links found on the page."""
         links: set[str] = set()
         for anchor in soup.find_all("a", href=True):
             normalised = self._normalise_url(anchor["href"], current_url)
@@ -107,6 +111,7 @@ class WebCrawler:
         return links
 
     def _extract_text(self, soup: BeautifulSoup) -> str:
+        """Extract visible text from the page, stripping scripts, styles, and excess whitespace."""
         body = soup.body or soup
         for element in body(["script", "style", "noscript"]):
             element.decompose()
@@ -115,6 +120,7 @@ class WebCrawler:
         return re.sub(r"\s+", " ", text).strip()
 
     def _extract_title(self, soup: BeautifulSoup, url: str) -> str:
+        """Return the page title from <title>, <h1>, or the URL as a fallback."""
         if soup.title and soup.title.string:
             return " ".join(soup.title.string.split())
 
@@ -125,10 +131,12 @@ class WebCrawler:
         return url
 
     def _is_internal_url(self, url: str) -> bool:
+        """Check whether a URL belongs to the same host as the crawl target."""
         parts = urlsplit(url)
         return parts.scheme in {"http", "https"} and parts.netloc == self.base_netloc
 
     def _normalise_url(self, url: str, current_url: str | None = None) -> str:
+        """Resolve, defragment, and lowercase a URL for consistent deduplication."""
         if current_url:
             url = urljoin(current_url, url)
 
