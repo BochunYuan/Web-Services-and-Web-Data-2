@@ -59,6 +59,7 @@ class WebCrawler:
 
         while queue:
             url = queue.popleft()
+            print(f"Crawling [{len(pages) + 1}/{len(pages) + len(queue) + 1}]: {url}")
             try:
                 page = self._fetch_page(url)
             except requests.RequestException as exc:
